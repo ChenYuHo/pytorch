@@ -194,7 +194,7 @@ GetAsyncNetThreadPool(int device_id, int pool_size, bool create_new) {
   static std::mutex pool_mutex;
 
   const auto& device_type_name = DeviceTypeName(device_type);
-
+pool_size = 1;
   if (pool_size <= 0) {
     if (FLAGS_caffe2_net_async_thread_pool_size > 0) {
       pool_size = FLAGS_caffe2_net_async_thread_pool_size;
