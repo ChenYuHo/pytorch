@@ -1291,7 +1291,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
             options->timeout = timeout;
             // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-            options->threads = options->devices.size() * 2;
+            options->threads = 1;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
           }),

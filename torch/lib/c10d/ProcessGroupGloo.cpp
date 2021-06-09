@@ -1301,9 +1301,16 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
-      uint32_t tag)
-      : AsyncAllreduceWork(context, inputs, reduceOp, tag) {
+      uint32_t tag, 
+      omnireduce::OmniContext& omniContext)
+      : AsyncAllreduceWork(context, inputs, reduceOp, tag), omniContext(omniContext) {
     initializeStreamsEvents(inputs, streams, events);
+
+    const auto& scalarType = inputs[0].scalar_type();
+    if (reduceOp == ReduceOp::SUM &&
+        (scalarType == ::at::ScalarType::Float || scalarType == ::at::ScalarType::Int))
+        use_omnireduce=true;
+    else {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
@@ -1312,9 +1319,29 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
+
+    use_omnireduce=false;
+    }
   }
 
   void run() override {
+    if (use_omnireduce) {
+      at::cuda::OptionalCUDAGuard device_guard;
+      device_guard.set_index(inputs[0].device().index());
+      const auto& scalarType = inputs[0].scalar_type();
+      switch (scalarType) {
+        case ::at::ScalarType::Float:
+          omniContext.AllReduce(getDataPointer<float>(inputs[0]), int(inputs[0].numel()), streams[0].stream(), inputs[0].device().index());
+          break;
+        case ::at::ScalarType::Int:
+          omniContext.AllReduce(getDataPointer<int32_t>(inputs[0]), int(inputs[0].numel()), streams[0].stream(), inputs[0].device().index());
+          break; 
+        default:
+          std::cerr<<"Data type error"<<std::endl;
+      }
+      events[0].record(streams[0]);
+    }
+    else {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
@@ -1331,17 +1358,28 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
+
+    }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
+    if (use_omnireduce) {
+      at::cuda::OptionalCUDAGuard guard;
+      guard.set_index(inputs[0].device().index());
+      events[0].block(at::cuda::getCurrentCUDAStream());
+    }
+    else {
     at::cuda::OptionalCUDAGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
+    }
   }
 
+  bool use_omnireduce;
+  omnireduce::OmniContext& omniContext;
   std::vector<at::Tensor> tmp;
   std::vector<at::cuda::CUDAStream> streams;
   std::vector<at::cuda::CUDAEvent> events;
@@ -1452,7 +1490,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   } else if (device.type() == at::kCUDA) {
     if (layout == c10::kStrided) {
       work = c10::make_intrusive<AsyncAllreduceCUDAWork>(
-          std::move(context), inputs, opts.reduceOp, tag);
+          std::move(context), inputs, opts.reduceOp, tag, omniContext);
     } else if (layout == c10::kSparse) {
       work = c10::make_intrusive<AsyncSparseAllreduceCUDAWork>(
           std::move(context), inputs, tag);

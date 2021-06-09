@@ -82,6 +82,7 @@ if(USE_C10D_GLOO)
 endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
+target_link_libraries(c10d PUBLIC ibverbs boost_system boost_thread boost_chrono boost_program_options omnireduce)
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
 

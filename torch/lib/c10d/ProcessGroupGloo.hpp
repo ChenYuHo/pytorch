@@ -13,6 +13,7 @@
 #include <gloo/context.h>
 #include <gloo/rendezvous/store.h>
 #include <gloo/transport/device.h>
+#include <omnireduce/context.hpp>
 
 #include <c10/util/hash.h>
 
@@ -325,6 +326,7 @@ class ProcessGroupGloo : public ProcessGroup {
   // In order to use more than one device (or allow for parallelism on
   // a single device), you need multiple contexts.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
+  omnireduce::OmniContext& omniContext = omnireduce::OmniContext::getInstance();
   std::vector<std::thread> threads_;
   bool stop_;
 
